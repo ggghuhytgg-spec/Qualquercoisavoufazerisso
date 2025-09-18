@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local char, hrp, humanoid
@@ -10,6 +11,9 @@ local char, hrp, humanoid
 -- CONFIG DEFAULT
 local FLOAT_HEIGHT = 12
 local MOVE_SPEED_AIR = 24
+local ASCEND_SPEED = 30
+local HOVER_SMOOTH = 8
+local TILT_ANGLE = math.rad(12)
 
 -- FLAGS
 local floating = false
@@ -25,7 +29,7 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 220, 0, 200)
+main.Size = UDim2.new(0, 220, 0, 220)
 main.Position = UDim2.new(0.7, 0, 0.2, 0)
 main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 main.Active = true
@@ -97,8 +101,8 @@ local airwalkBtn = createButton("Ativar AirWalk",75,Color3.fromRGB(150,0,255))
 local godBtn = createButton("Ativar GodMode",110,Color3.fromRGB(0,200,100))
 
 -- Sliders
-createSlider("Altura:",140,FLOAT_HEIGHT,function(v) FLOAT_HEIGHT = v end)
-createSlider("Velocidade:",170,MOVE_SPEED_AIR,function(v) MOVE_SPEED_AIR = v end)
+createSlider("Altura:",150,FLOAT_HEIGHT,function(v) FLOAT_HEIGHT = v end)
+createSlider("Velocidade:",180,MOVE_SPEED_AIR,function(v) MOVE_SPEED_AIR = v end)
 
 -- Setup Character
 local function setupCharacter(c)
@@ -109,14 +113,18 @@ end
 if player.Character then setupCharacter(player.Character) end
 player.CharacterAdded:Connect(setupCharacter)
 
--- Float
+-- Float (corrigido)
 local function enableFloat()
     if floating or not hrp then return end
     floating = true
-    att = Instance.new("Attachment",hrp)
+
+    att = Instance.new("Attachment")
+    att.Parent = hrp
+
     vectorForce = Instance.new("VectorForce")
     vectorForce.Attachment0 = att
     vectorForce.RelativeTo = Enum.ActuatorRelativeTo.World
+    vectorForce.ApplyAtCenterOfMass = true
     vectorForce.Force = Vector3.new()
     vectorForce.Parent = hrp
 
@@ -124,6 +132,7 @@ local function enableFloat()
     alignOri.Attachment0 = att
     alignOri.Responsiveness = 50
     alignOri.MaxTorque = 1e6
+    alignOri.RigidityEnabled = false
     alignOri.Parent = hrp
 
     toggle.Text = "Desativar Float"
@@ -143,7 +152,7 @@ toggle.MouseButton1Click:Connect(function()
     if floating then disableFloat() else enableFloat() end
 end)
 
--- AirWalk
+-- AirWalk (NÃO MEXI)
 airwalkBtn.MouseButton1Click:Connect(function()
     airwalk = not airwalk
     if airwalk and hrp then
@@ -171,25 +180,47 @@ end)
 
 -- Loop principal
 RunService.Heartbeat:Connect(function(dt)
-    -- Float
-    if floating and hrp then
+    -- Float (mantém altura acima do chão definida pelo slider)
+    if floating and hrp and humanoid then
         local moveDir = humanoid.MoveDirection
-        local desiredVel = Vector3.new(moveDir.X,0,moveDir.Z) * MOVE_SPEED_AIR
-        vectorForce.Force = (desiredVel - hrp.Velocity) * hrp.AssemblyMass
-        alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + (moveDir.Magnitude>0 and moveDir or hrp.CFrame.LookVector))
+
+        -- raycast pra baixo encontrar o chão
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Blacklist
+        rp.FilterDescendantsInstances = {char}
+        local down = Workspace:Raycast(hrp.Position, Vector3.new(0, -200, 0), rp)
+        local groundY = down and down.Position.Y or (hrp.Position.Y - FLOAT_HEIGHT)
+        local targetY = groundY + FLOAT_HEIGHT
+
+        local heightError = targetY - hrp.Position.Y
+        -- velocidade vertical desejada proporcional ao erro
+        local desiredVY = math.clamp(heightError * HOVER_SMOOTH, -ASCEND_SPEED, ASCEND_SPEED)
+
+        local desiredVel = Vector3.new(moveDir.X * MOVE_SPEED_AIR, desiredVY, moveDir.Z * MOVE_SPEED_AIR)
+        local mass = hrp.AssemblyMass
+        local accel = (desiredVel - hrp.Velocity) / math.max(dt, 1/60)
+        vectorForce.Force = accel * mass
+
+        -- orientação com tilt
+        if moveDir.Magnitude > 0.1 then
+            local tilt = CFrame.Angles(-TILT_ANGLE, 0, 0)
+            alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + Vector3.new(moveDir.X, 0, moveDir.Z)) * tilt
+        else
+            alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + hrp.CFrame.LookVector)
+        end
     end
 
-    -- AirWalk
-    if airwalk and hrp then
+    -- AirWalk (SEM ALTERAÇÕES)
+    if airwalk and hrp and humanoid then
         local moveDir = humanoid.MoveDirection
         hrp.Velocity = Vector3.new(moveDir.X * MOVE_SPEED_AIR, 0, moveDir.Z * MOVE_SPEED_AIR)
     end
 
-    -- GodMode
+    -- GodMode (mantém vida no máximo enquanto ativo)
     if godmode and humanoid then
         humanoid.MaxHealth = math.huge
         humanoid.Health = math.huge
     end
 end)
 
-print("[Float Superman GUI] carregado com Float, AirWalk e GodMode travado!")
+print("[Float Superman GUI] Float corrigido — AirWalk não foi alterado.")
