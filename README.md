@@ -1,226 +1,212 @@
--- FloatSupermanGUI.lua
+-- CompleteGUI_FlyingPlatform3D.lua
 -- LocalScript (StarterPlayer > StarterPlayerScripts)
 
 local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local player = Players.LocalPlayer
-local char, hrp, humanoid
+-- referências do personagem
+local char = player.Character or player.CharacterAdded:Wait()
+local humanoid = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
 
--- CONFIG DEFAULT
-local FLOAT_HEIGHT = 12
-local MOVE_SPEED_AIR = 24
-local ASCEND_SPEED = 30
-local HOVER_SMOOTH = 8
-local TILT_ANGLE = math.rad(12)
+-- variáveis
+local jumpActive = false
+local skyActive = false
+local antiActive = false
+local platform
+local workspaceGravity = 196.2
+local moonGravity = 120
+local platformOffset = Vector3.new(0,5,0)
+local platformFollowConn
 
--- FLAGS
-local floating = false
-local airwalk = false
-local godmode = false
+-- GUI principal
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CompleteGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
-local vectorForce, att, alignOri
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 280, 0, 240)
+frame.Position = UDim2.new(0.5, -140, 0.7, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+frame.Active = true
+frame.Draggable = true
+frame.Parent = screenGui
 
--- GUI
-local gui = Instance.new("ScreenGui")
-gui.Name = "FloatSupermanGUI"
-gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0,16)
+corner.Parent = frame
 
-local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 220, 0, 220)
-main.Position = UDim2.new(0.7, 0, 0.2, 0)
-main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-main.Active = true
-main.Draggable = true
-main.Parent = gui
+-- função criar botão
+local function createButton(name, posY)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -20, 0, 40)
+	btn.Position = UDim2.new(0,10,0,posY)
+	btn.Text = name .. ": OFF"
+	btn.TextColor3 = Color3.new(1,1,1)
+	btn.Font = Enum.Font.FredokaOne
+	btn.TextScaled = true
+	btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+	btn.Parent = frame
 
-Instance.new("UICorner", main).CornerRadius = UDim.new(0,16)
-local shadow = Instance.new("UIStroke", main)
-shadow.Thickness = 2
-shadow.Color = Color3.fromRGB(0,150,255)
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,0,0,30)
-title.BackgroundTransparency = 1
-title.Text = "⚡ Float Superman"
-title.TextColor3 = Color3.fromRGB(255,255,255)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.Parent = main
-
--- Função criar botão
-local function createButton(text,posY,color)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0,180,0,30)
-    btn.Position = UDim2.new(0.5,-90,0,posY)
-    btn.Text = text
-    btn.BackgroundColor3 = color
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 14
-    btn.Parent = main
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,12)
-    return btn
-end
-
--- Função criar sliders
-local function createSlider(name,posY,default,callback)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0,100,0,20)
-    label.Position = UDim2.new(0,10,0,posY)
-    label.BackgroundTransparency = 1
-    label.Text = name
-    label.TextColor3 = Color3.fromRGB(255,255,255)
-    label.Font = Enum.Font.Gotham
-    label.TextSize = 14
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = main
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(0,80,0,20)
-    box.Position = UDim2.new(0,120,0,posY)
-    box.BackgroundColor3 = Color3.fromRGB(40,40,40)
-    box.TextColor3 = Color3.fromRGB(255,255,255)
-    box.Font = Enum.Font.Gotham
-    box.TextSize = 14
-    box.Text = tostring(default)
-    box.Parent = main
-    Instance.new("UICorner", box).CornerRadius = UDim.new(0,8)
-
-    box.FocusLost:Connect(function()
-        local num = tonumber(box.Text)
-        if num then callback(num) end
-    end)
+	local bcorner = Instance.new("UICorner")
+	bcorner.CornerRadius = UDim.new(0,10)
+	bcorner.Parent = btn
+	return btn
 end
 
 -- Botões
-local toggle = createButton("Ativar Float",40,Color3.fromRGB(0,120,255))
-local airwalkBtn = createButton("Ativar AirWalk",75,Color3.fromRGB(150,0,255))
-local godBtn = createButton("Ativar GodMode",110,Color3.fromRGB(0,200,100))
+local jumpBtn = createButton("Jump Boost", 10)
+local skyBtn = createButton("Sky Platform", 60)
+local antiBtn = createButton("Anti-Ragdoll", 110)
+local wallBtn = createButton("Wall Transparency", 160)
 
--- Sliders
-createSlider("Altura:",150,FLOAT_HEIGHT,function(v) FLOAT_HEIGHT = v end)
-createSlider("Velocidade:",180,MOVE_SPEED_AIR,function(v) MOVE_SPEED_AIR = v end)
+-- Textbox para JumpPower
+local jumpBox = Instance.new("TextBox")
+jumpBox.Size = UDim2.new(1, -20, 0, 30)
+jumpBox.Position = UDim2.new(0,10,0,210)
+jumpBox.Text = "75"
+jumpBox.PlaceholderText = "Digite JumpPower"
+jumpBox.TextColor3 = Color3.new(1,1,1)
+jumpBox.Font = Enum.Font.FredokaOne
+jumpBox.TextScaled = true
+jumpBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+jumpBox.Parent = frame
 
--- Setup Character
-local function setupCharacter(c)
-    char = c
-    humanoid = char:WaitForChild("Humanoid")
-    hrp = char:WaitForChild("HumanoidRootPart")
+local boxCorner = Instance.new("UICorner")
+boxCorner.CornerRadius = UDim.new(0,8)
+boxCorner.Parent = jumpBox
+
+-- variáveis auxiliares
+local heartbeatConn
+local wallConn
+
+-- Jump Boost Moon Jump
+jumpBtn.MouseButton1Click:Connect(function()
+	jumpActive = not jumpActive
+	if jumpActive then
+		pcall(function()
+			humanoid.UseJumpPower = true
+			humanoid.JumpPower = tonumber(jumpBox.Text) or 75
+			Workspace.Gravity = moonGravity
+		end)
+		jumpBtn.Text = "Jump Boost: ON"
+
+		-- Moon Jump
+		if heartbeatConn then heartbeatConn:Disconnect() end
+		heartbeatConn = RunService.Heartbeat:Connect(function()
+			if jumpActive and humanoid.FloorMaterial == Enum.Material.Air then
+				local vel = hrp.Velocity
+				if vel.Y < 0 then
+					pcall(function()
+						hrp.Velocity = Vector3.new(vel.X, vel.Y * 0.6, vel.Z)
+					end)
+				end
+			end
+		end)
+	else
+		pcall(function()
+			humanoid.JumpPower = 50
+			Workspace.Gravity = 196.2
+		end)
+		jumpBtn.Text = "Jump Boost: OFF"
+		if heartbeatConn then heartbeatConn:Disconnect() heartbeatConn = nil end
+	end
+end)
+
+-- Atualiza JumpPower ao digitar valor
+jumpBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed and jumpActive then
+		local val = tonumber(jumpBox.Text)
+		if val then
+			pcall(function() humanoid.JumpPower = val end)
+		end
+	end
+end)
+
+-- Sky Platform 3D dinâmica
+skyBtn.MouseButton1Click:Connect(function()
+	skyActive = not skyActive
+	if skyActive then
+		if not platform then
+			pcall(function()
+				platform = Instance.new("Part")
+				platform.Size = Vector3.new(40,2,40)
+				platform.Anchored = true
+				platform.Material = Enum.Material.Neon
+				platform.Transparency = 0.3
+				platform.Color = Color3.fromRGB(0,170,255)
+				platform.Name = "SkyPlatform_"..tostring(math.random(1000,9999))
+				platform.Parent = Workspace
+			end)
+		end
+
+		if platformFollowConn then platformFollowConn:Disconnect() end
+		platformFollowConn = RunService.Heartbeat:Connect(function()
+			if hrp and platform then
+				pcall(function()
+					-- plataforma segue player X/Y/Z (base voadora completa)
+					platform.Position = hrp.Position - Vector3.new(0, -platformOffset.Y, 0)
+				end)
+			end
+		end)
+
+		skyBtn.Text = "Sky Platform: ON"
+	else
+		if platformFollowConn then platformFollowConn:Disconnect() platformFollowConn = nil end
+		if platform then pcall(function() platform:Destroy() end) platform = nil end
+		skyBtn.Text = "Sky Platform: OFF"
+	end
+end)
+
+-- Anti-Ragdoll
+local function removeRagdollConstraints(model)
+	for _,v in pairs(model:GetDescendants()) do
+		if v:IsA("BallSocketConstraint") or v:IsA("HingeConstraint") then
+			pcall(function() v:Destroy() end)
+		end
+	end
 end
-if player.Character then setupCharacter(player.Character) end
-player.CharacterAdded:Connect(setupCharacter)
 
--- Float (corrigido)
-local function enableFloat()
-    if floating or not hrp then return end
-    floating = true
-
-    att = Instance.new("Attachment")
-    att.Parent = hrp
-
-    vectorForce = Instance.new("VectorForce")
-    vectorForce.Attachment0 = att
-    vectorForce.RelativeTo = Enum.ActuatorRelativeTo.World
-    vectorForce.ApplyAtCenterOfMass = true
-    vectorForce.Force = Vector3.new()
-    vectorForce.Parent = hrp
-
-    alignOri = Instance.new("AlignOrientation")
-    alignOri.Attachment0 = att
-    alignOri.Responsiveness = 50
-    alignOri.MaxTorque = 1e6
-    alignOri.RigidityEnabled = false
-    alignOri.Parent = hrp
-
-    toggle.Text = "Desativar Float"
-    toggle.BackgroundColor3 = Color3.fromRGB(200,50,50)
-end
-
-local function disableFloat()
-    floating = false
-    if vectorForce then vectorForce:Destroy() vectorForce = nil end
-    if alignOri then alignOri:Destroy() alignOri = nil end
-    if att then att:Destroy() att = nil end
-    toggle.Text = "Ativar Float"
-    toggle.BackgroundColor3 = Color3.fromRGB(0,120,255)
-end
-
-toggle.MouseButton1Click:Connect(function()
-    if floating then disableFloat() else enableFloat() end
+antiBtn.MouseButton1Click:Connect(function()
+	antiActive = not antiActive
+	if antiActive then
+		removeRagdollConstraints(char)
+		char.DescendantAdded:Connect(function(desc)
+			if antiActive and (desc:IsA("BallSocketConstraint") or desc:IsA("HingeConstraint")) then
+				pcall(function() desc:Destroy() end)
+			end
+		end)
+		antiBtn.Text = "Anti-Ragdoll: ON"
+	else
+		antiBtn.Text = "Anti-Ragdoll: OFF"
+	end
 end)
 
--- AirWalk (NÃO MEXI)
-airwalkBtn.MouseButton1Click:Connect(function()
-    airwalk = not airwalk
-    if airwalk and hrp then
-        airwalkBtn.Text = "Desativar AirWalk"
-        airwalkBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
-        humanoid.PlatformStand = true
-    else
-        airwalkBtn.Text = "Ativar AirWalk"
-        airwalkBtn.BackgroundColor3 = Color3.fromRGB(150,0,255)
-        humanoid.PlatformStand = false
-    end
+-- Wall Transparency
+wallBtn.MouseButton1Click:Connect(function()
+	if wallConn then
+		wallConn:Disconnect()
+		wallConn = nil
+		wallBtn.Text = "Wall Transparency: OFF"
+	else
+		wallConn = RunService.Heartbeat:Connect(function()
+			for _,part in pairs(Workspace:GetDescendants()) do
+				if part:IsA("Part") and part.CanCollide and part.Anchored then
+					pcall(function() part.Transparency = 0.5 end)
+				end
+			end
+		end)
+		wallBtn.Text = "Wall Transparency: ON"
+	end
 end)
 
--- GodMode travado
-godBtn.MouseButton1Click:Connect(function()
-    godmode = not godmode
-    if godmode then
-        godBtn.Text = "Desativar GodMode"
-        godBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
-    else
-        godBtn.Text = "Ativar GodMode"
-        godBtn.BackgroundColor3 = Color3.fromRGB(0,200,100)
-    end
+-- Atualiza referências ao respawnar
+player.CharacterAdded:Connect(function(newChar)
+	char = newChar
+	humanoid = newChar:WaitForChild("Humanoid")
+	hrp = newChar:WaitForChild("HumanoidRootPart")
 end)
-
--- Loop principal
-RunService.Heartbeat:Connect(function(dt)
-    -- Float (mantém altura acima do chão definida pelo slider)
-    if floating and hrp and humanoid then
-        local moveDir = humanoid.MoveDirection
-
-        -- raycast pra baixo encontrar o chão
-        local rp = RaycastParams.new()
-        rp.FilterType = Enum.RaycastFilterType.Blacklist
-        rp.FilterDescendantsInstances = {char}
-        local down = Workspace:Raycast(hrp.Position, Vector3.new(0, -200, 0), rp)
-        local groundY = down and down.Position.Y or (hrp.Position.Y - FLOAT_HEIGHT)
-        local targetY = groundY + FLOAT_HEIGHT
-
-        local heightError = targetY - hrp.Position.Y
-        -- velocidade vertical desejada proporcional ao erro
-        local desiredVY = math.clamp(heightError * HOVER_SMOOTH, -ASCEND_SPEED, ASCEND_SPEED)
-
-        local desiredVel = Vector3.new(moveDir.X * MOVE_SPEED_AIR, desiredVY, moveDir.Z * MOVE_SPEED_AIR)
-        local mass = hrp.AssemblyMass
-        local accel = (desiredVel - hrp.Velocity) / math.max(dt, 1/60)
-        vectorForce.Force = accel * mass
-
-        -- orientação com tilt
-        if moveDir.Magnitude > 0.1 then
-            local tilt = CFrame.Angles(-TILT_ANGLE, 0, 0)
-            alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + Vector3.new(moveDir.X, 0, moveDir.Z)) * tilt
-        else
-            alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + hrp.CFrame.LookVector)
-        end
-    end
-
-    -- AirWalk (SEM ALTERAÇÕES)
-    if airwalk and hrp and humanoid then
-        local moveDir = humanoid.MoveDirection
-        hrp.Velocity = Vector3.new(moveDir.X * MOVE_SPEED_AIR, 0, moveDir.Z * MOVE_SPEED_AIR)
-    end
-
-    -- GodMode (mantém vida no máximo enquanto ativo)
-    if godmode and humanoid then
-        humanoid.MaxHealth = math.huge
-        humanoid.Health = math.huge
-    end
-end)
-
-print("[Float Superman GUI] Float corrigido — AirWalk não foi alterado.")
